@@ -1,0 +1,793 @@
+-- ============================================================
+--  졸업요건 확인 시스템 — 전체 스키마 + 산업경영 데이터
+--  실행: 이 파일 전체를 Workbench에 붙여넣고 Ctrl+Shift+Enter
+-- ============================================================
+
+-- 기존 DB 통째로 지우고 새로 시작 (데이터 없으니 안전)
+
+-- ============================================================
+--  테이블 생성
+-- ============================================================
+
+-- 1. 학과
+CREATE TABLE department (
+    dept_id    INT          NOT NULL AUTO_INCREMENT,
+    dept_name  VARCHAR(50)  NOT NULL,
+    PRIMARY KEY (dept_id)
+);
+
+-- 2. 교육과정 (학과 + 입학년도 단위)
+--    전공선택 필요학점만 저장 (전공필수는 required_course 목록으로 판정)
+CREATE TABLE curriculum (
+    curr_id            INT  NOT NULL AUTO_INCREMENT,
+    dept_id            INT  NOT NULL,
+    entrance_year      INT  NOT NULL,
+    elective_normal    INT  NOT NULL,   -- 일반: 전공선택 필요학점
+    elective_intensive INT  NOT NULL,   -- 심화: 전공선택 필요학점
+    elective_double    INT  NOT NULL,   -- 이중: 전공선택 필요학점
+    toeic_min          INT  NOT NULL,   -- 토익 기준 (0이면 어학조건 없음)
+    PRIMARY KEY (curr_id),
+    CONSTRAINT fk_curr_dept FOREIGN KEY (dept_id) REFERENCES department(dept_id),
+    UNIQUE KEY uq_curr (dept_id, entrance_year)
+);
+
+-- 3. 과목
+CREATE TABLE course (
+    course_id    INT          NOT NULL AUTO_INCREMENT,
+    dept_id      INT          NOT NULL,
+    course_code  VARCHAR(15)  NOT NULL,
+    course_name  VARCHAR(50)  NOT NULL,
+    credit       INT          NOT NULL,
+    course_type  ENUM('major_required','major_elective') NOT NULL,
+    PRIMARY KEY (course_id),
+    CONSTRAINT fk_course_dept FOREIGN KEY (dept_id) REFERENCES department(dept_id)
+);
+
+-- 4. 전공필수 목록 (교육과정별)
+CREATE TABLE required_course (
+    req_id     INT  NOT NULL AUTO_INCREMENT,
+    curr_id    INT  NOT NULL,
+    course_id  INT  NOT NULL,
+    PRIMARY KEY (req_id),
+    CONSTRAINT fk_req_curr   FOREIGN KEY (curr_id)   REFERENCES curriculum(curr_id),
+    CONSTRAINT fk_req_course FOREIGN KEY (course_id) REFERENCES course(course_id),
+    UNIQUE KEY uq_req (curr_id, course_id)
+);
+
+-- 5. 경영교과 같은 '지정과목 그룹' 요건 (교육과정별로 N학점 이수)
+CREATE TABLE elective_group (
+    group_id        INT          NOT NULL AUTO_INCREMENT,
+    curr_id         INT          NOT NULL,
+    group_name      VARCHAR(50)  NOT NULL,
+    required_credit INT          NOT NULL,
+    PRIMARY KEY (group_id),
+    CONSTRAINT fk_eg_curr FOREIGN KEY (curr_id) REFERENCES curriculum(curr_id)
+);
+
+-- 6. 그룹에 속한 과목 목록
+CREATE TABLE elective_group_course (
+    egc_id    INT NOT NULL AUTO_INCREMENT,
+    group_id  INT NOT NULL,
+    course_id INT NOT NULL,
+    PRIMARY KEY (egc_id),
+    CONSTRAINT fk_egc_group  FOREIGN KEY (group_id)  REFERENCES elective_group(group_id),
+    CONSTRAINT fk_egc_course FOREIGN KEY (course_id) REFERENCES course(course_id),
+    UNIQUE KEY uq_egc (group_id, course_id)
+);
+
+-- 7. 학생
+CREATE TABLE student (
+    student_id         BIGINT       NOT NULL,
+    student_name       VARCHAR(50)  NOT NULL,
+    curr_id            INT          NOT NULL,
+    double_curr_id     INT          NULL,
+    major_track        ENUM('intensive','double') NOT NULL,
+    human_rights_count INT          NOT NULL DEFAULT 0,
+    PRIMARY KEY (student_id),
+    CONSTRAINT fk_stu_curr        FOREIGN KEY (curr_id)        REFERENCES curriculum(curr_id),
+    CONSTRAINT fk_stu_double_curr FOREIGN KEY (double_curr_id) REFERENCES curriculum(curr_id)
+);
+
+-- 8. 수강이력
+CREATE TABLE enrollment (
+    enroll_id   INT          NOT NULL AUTO_INCREMENT,
+    student_id  BIGINT       NOT NULL,
+    course_id   INT          NOT NULL,
+    semester    VARCHAR(10)  NOT NULL,
+    grade       VARCHAR(3),
+    PRIMARY KEY (enroll_id),
+    CONSTRAINT fk_enr_stu    FOREIGN KEY (student_id) REFERENCES student(student_id),
+    CONSTRAINT fk_enr_course FOREIGN KEY (course_id)  REFERENCES course(course_id),
+    UNIQUE KEY uq_enr (student_id, course_id)
+);
+
+-- 9. 어학성적
+CREATE TABLE certification (
+    cert_id     INT          NOT NULL AUTO_INCREMENT,
+    student_id  BIGINT       NOT NULL,
+    cert_type   VARCHAR(20)  NOT NULL DEFAULT 'TOEIC',
+    score       INT          NOT NULL,
+    PRIMARY KEY (cert_id),
+    CONSTRAINT fk_cert_stu FOREIGN KEY (student_id) REFERENCES student(student_id)
+);
+
+-- ============================================================
+--  데이터 — 학과
+-- ============================================================
+INSERT INTO department (dept_id, dept_name) VALUES
+    (1,  '산업경영공학부'),
+    (2,  '수학과'),
+    (3,  '디지털경영전공'),
+    (99, '공통/기타교과');
+
+-- ============================================================
+--  데이터 — 산업경영 교육과정 (21~26학번)
+--  전공선택 필요학점: 일반 21 / 심화 42(21+21) / 이중 21, 토익 650
+-- ============================================================
+INSERT INTO curriculum
+    (curr_id, dept_id, entrance_year, elective_normal, elective_intensive, elective_double, toeic_min) VALUES
+    (1001, 1, 2021, 21, 42, 21, 650),
+    (1002, 1, 2022, 21, 42, 21, 650),
+    (1003, 1, 2023, 21, 42, 21, 650),
+    (1004, 1, 2024, 21, 42, 21, 650),
+    (1005, 1, 2025, 21, 42, 21, 650),
+    (1006, 1, 2026, 21, 42, 21, 650);
+
+-- ============================================================
+--  데이터 — 산업경영 과목 + 전공필수 연결
+-- ============================================================
+-- 산업경영 전공필수 8과목
+INSERT INTO course (course_id, dept_id, course_code, course_name, credit, course_type) VALUES
+    (101, 1, 'IMEN213', '수리통계및실습', 3, 'major_required'),
+    (102, 1, 'IMEN214', '응용통계및실습', 3, 'major_required'),
+    (103, 1, 'IMEN216', 'OR-Ⅰ및실습', 3, 'major_required'),
+    (104, 1, 'IMEN315', '인간공학', 3, 'major_required'),
+    (105, 1, 'IMEN319', 'OR-Ⅱ및실습', 3, 'major_required'),
+    (106, 1, 'IMEN333', '생산계획', 3, 'major_required'),
+    (107, 1, 'IMEN335', '정보시스템설계', 3, 'major_required'),
+    (108, 1, 'IMEN395', '제조시스템의이해', 3, 'major_required');
+
+-- 산업경영 전공선택 46과목
+INSERT INTO course (course_id, dept_id, course_code, course_name, credit, course_type) VALUES
+    (121, 1, 'IMEN151', '선형대수', 3, 'major_elective'),
+    (122, 1, 'IMEN153', '투자경제성분석', 3, 'major_elective'),
+    (123, 1, 'IMEN155', '산업공학의이해', 3, 'major_elective'),
+    (124, 1, 'IMEN156', '산업공학개론', 3, 'major_elective'),
+    (125, 1, 'IMEN158', '데이터분석을위한프로그래밍언어', 3, 'major_elective'),
+    (126, 1, 'IMEN204', '일반회계및원가계산', 3, 'major_elective'),
+    (127, 1, 'IMEN215', '경영공학개론', 3, 'major_elective'),
+    (128, 1, 'IMEN219', '휴먼인터페이스', 3, 'major_elective'),
+    (129, 1, 'IMEN221', '객체지향프로그래밍및실습', 3, 'major_elective'),
+    (130, 1, 'IMEN222', '공학수학', 3, 'major_elective'),
+    (131, 1, 'IMEN223', '경영과학개론', 3, 'major_elective'),
+    (132, 1, 'IMEN224', '자료구조및알고리즘', 3, 'major_elective'),
+    (133, 1, 'IMEN225', '사용자경험과인공지능', 3, 'major_elective'),
+    (134, 1, 'IMEN239', '지식재산및기술의평가와활용', 3, 'major_elective'),
+    (135, 1, 'IMEN255', '생산시스템공학및실험', 3, 'major_elective'),
+    (136, 1, 'IMEN256', '인공지능과지식재산', 3, 'major_elective'),
+    (137, 1, 'IMEN302', '공급사슬경영', 3, 'major_elective'),
+    (138, 1, 'IMEN320', '최적화응용', 3, 'major_elective'),
+    (139, 1, 'IMEN321', '데이터마이닝', 3, 'major_elective'),
+    (140, 1, 'IMEN324', '시뮬레이션및실습', 3, 'major_elective'),
+    (141, 1, 'IMEN338', '실험계획법', 3, 'major_elective'),
+    (142, 1, 'IMEN339', '실험계획과통계분석', 3, 'major_elective'),
+    (143, 1, 'IMEN340', '지식재산과빅데이터분석', 3, 'major_elective'),
+    (144, 1, 'IMEN357', '최적화이론', 3, 'major_elective'),
+    (145, 1, 'IMEN358', '품질공학', 3, 'major_elective'),
+    (146, 1, 'IMEN361', '시스템공학특론-Ⅰ', 3, 'major_elective'),
+    (147, 1, 'IMEN362', '시스템공학특론-Ⅱ', 3, 'major_elective'),
+    (148, 1, 'IMEN376', '스마트생산운영관리', 3, 'major_elective'),
+    (149, 1, 'IMEN382', '제품개발', 3, 'major_elective'),
+    (150, 1, 'IMEN383', '헬스시스템엔지니어링', 3, 'major_elective'),
+    (151, 1, 'IMEN384', '스마트물류와지식재산', 3, 'major_elective'),
+    (152, 1, 'IMEN390', '물류시스템최적화', 3, 'major_elective'),
+    (153, 1, 'IMEN392', '스마트제조', 3, 'major_elective'),
+    (154, 1, 'IMEN394', '데이터기반신뢰성공학', 3, 'major_elective'),
+    (155, 1, 'IMEN407', '물류시스템설계', 3, 'major_elective'),
+    (156, 1, 'IMEN415', '다변량분석', 3, 'major_elective'),
+    (157, 1, 'IMEN427', '시계열데이터모델링', 3, 'major_elective'),
+    (158, 1, 'IMEN431', '예측애널리틱스', 3, 'major_elective'),
+    (159, 1, 'IMEN453', '영상정보시스템', 3, 'major_elective'),
+    (160, 1, 'IMEN457', '시스템분석', 3, 'major_elective'),
+    (161, 1, 'IMEN460', '메타휴리스틱', 3, 'major_elective'),
+    (162, 1, 'IMEN461', '시사경영과학', 3, 'major_elective'),
+    (163, 1, 'IMEN466', '서비스공학', 3, 'major_elective'),
+    (164, 1, 'IMEN468', '산업공학을위한딥러닝', 3, 'major_elective'),
+    (165, 1, 'IMEN471', '캡스톤디자인Ⅰ', 3, 'major_elective'),
+    (166, 1, 'IMEN472', '캡스톤디자인Ⅱ', 3, 'major_elective');
+
+-- 경영교과 25과목 (가상학과 99 소속)
+INSERT INTO course (course_id, dept_id, course_code, course_name, credit, course_type) VALUES
+    (901, 99, 'BUSS152', '회계학원리', 3, 'major_elective'),
+    (902, 99, 'BUSS205', '마케팅원론', 3, 'major_elective'),
+    (903, 99, 'BUSS207', '재무관리', 3, 'major_elective'),
+    (904, 99, 'BUSS211', '오퍼레이션스관리', 3, 'major_elective'),
+    (905, 99, 'BUSS213', '중급회계I', 3, 'major_elective'),
+    (906, 99, 'BUSS215', '경영정보시스템', 3, 'major_elective'),
+    (907, 99, 'BUSS244', '관리회계', 3, 'major_elective'),
+    (908, 99, 'BUSS246', '경영과학', 3, 'major_elective'),
+    (909, 99, 'BUSS259', '벤처경영', 3, 'major_elective'),
+    (910, 99, 'BUSS311', '조직행동론', 3, 'major_elective'),
+    (911, 99, 'BUSS313', '국제경영론', 3, 'major_elective'),
+    (912, 99, 'BUSS356', '혁신과전략', 3, 'major_elective'),
+    (913, 99, 'BUSS402', '경영전략', 3, 'major_elective'),
+    (914, 99, 'BUSS407', '신상품개발과마케팅', 3, 'major_elective'),
+    (915, 99, 'BUSS409', '소셜벤처창업', 3, 'major_elective'),
+    (916, 99, 'GESO018', '생활속의지적재산권', 3, 'major_elective'),
+    (917, 99, 'ISC129', 'Business Strategy', 3, 'major_elective'),
+    (918, 99, 'ISC204', 'Principles of Financial Accounting', 3, 'major_elective'),
+    (919, 99, 'ISC211', 'Managerial Accounting', 3, 'major_elective'),
+    (920, 99, 'ISC212', 'Principles of Accounting', 3, 'major_elective'),
+    (921, 99, 'ISC213', 'Introduction to Management Information Systems', 3, 'major_elective'),
+    (922, 99, 'ISC303', 'International Finance', 3, 'major_elective'),
+    (923, 99, 'ISC309', 'Organizational Behavior', 3, 'major_elective'),
+    (924, 99, 'EGRN203', '과학기술과지식재산', 3, 'major_elective'),
+    (925, 99, 'EGRN332', '기술과창업', 3, 'major_elective');
+
+-- 전공필수 연결: 21~24학번은 7과목(101~107), 25·26학번은 8과목(101~108)
+INSERT INTO required_course (curr_id, course_id) VALUES
+    (1001, 101),
+    (1001, 102),
+    (1001, 103),
+    (1001, 104),
+    (1001, 105),
+    (1001, 106),
+    (1001, 107),
+    (1002, 101),
+    (1002, 102),
+    (1002, 103),
+    (1002, 104),
+    (1002, 105),
+    (1002, 106),
+    (1002, 107),
+    (1003, 101),
+    (1003, 102),
+    (1003, 103),
+    (1003, 104),
+    (1003, 105),
+    (1003, 106),
+    (1003, 107),
+    (1004, 101),
+    (1004, 102),
+    (1004, 103),
+    (1004, 104),
+    (1004, 105),
+    (1004, 106),
+    (1004, 107),
+    (1005, 101),
+    (1005, 102),
+    (1005, 103),
+    (1005, 104),
+    (1005, 105),
+    (1005, 106),
+    (1005, 107),
+    (1005, 108),
+    (1006, 101),
+    (1006, 102),
+    (1006, 103),
+    (1006, 104),
+    (1006, 105),
+    (1006, 106),
+    (1006, 107),
+    (1006, 108);
+
+-- ============================================================
+--  데이터 — 경영교과 그룹 요건 (산업경영 전 학번 6학점 이수)
+-- ============================================================
+INSERT INTO elective_group (group_id, curr_id, group_name, required_credit) VALUES
+    (1, 1001, '경영교과', 6),
+    (2, 1002, '경영교과', 6),
+    (3, 1003, '경영교과', 6),
+    (4, 1004, '경영교과', 6),
+    (5, 1005, '경영교과', 6),
+    (6, 1006, '경영교과', 6);
+
+INSERT INTO elective_group_course (group_id, course_id) VALUES
+    (1, 901),
+    (1, 902),
+    (1, 903),
+    (1, 904),
+    (1, 905),
+    (1, 906),
+    (1, 907),
+    (1, 908),
+    (1, 909),
+    (1, 910),
+    (1, 911),
+    (1, 912),
+    (1, 913),
+    (1, 914),
+    (1, 915),
+    (1, 916),
+    (1, 917),
+    (1, 918),
+    (1, 919),
+    (1, 920),
+    (1, 921),
+    (1, 922),
+    (1, 923),
+    (1, 924),
+    (1, 925),
+    (2, 901),
+    (2, 902),
+    (2, 903),
+    (2, 904),
+    (2, 905),
+    (2, 906),
+    (2, 907),
+    (2, 908),
+    (2, 909),
+    (2, 910),
+    (2, 911),
+    (2, 912),
+    (2, 913),
+    (2, 914),
+    (2, 915),
+    (2, 916),
+    (2, 917),
+    (2, 918),
+    (2, 919),
+    (2, 920),
+    (2, 921),
+    (2, 922),
+    (2, 923),
+    (2, 924),
+    (2, 925),
+    (3, 901),
+    (3, 902),
+    (3, 903),
+    (3, 904),
+    (3, 905),
+    (3, 906),
+    (3, 907),
+    (3, 908),
+    (3, 909),
+    (3, 910),
+    (3, 911),
+    (3, 912),
+    (3, 913),
+    (3, 914),
+    (3, 915),
+    (3, 916),
+    (3, 917),
+    (3, 918),
+    (3, 919),
+    (3, 920),
+    (3, 921),
+    (3, 922),
+    (3, 923),
+    (3, 924),
+    (3, 925),
+    (4, 901),
+    (4, 902),
+    (4, 903),
+    (4, 904),
+    (4, 905),
+    (4, 906),
+    (4, 907),
+    (4, 908),
+    (4, 909),
+    (4, 910),
+    (4, 911),
+    (4, 912),
+    (4, 913),
+    (4, 914),
+    (4, 915),
+    (4, 916),
+    (4, 917),
+    (4, 918),
+    (4, 919),
+    (4, 920),
+    (4, 921),
+    (4, 922),
+    (4, 923),
+    (4, 924),
+    (4, 925),
+    (5, 901),
+    (5, 902),
+    (5, 903),
+    (5, 904),
+    (5, 905),
+    (5, 906),
+    (5, 907),
+    (5, 908),
+    (5, 909),
+    (5, 910),
+    (5, 911),
+    (5, 912),
+    (5, 913),
+    (5, 914),
+    (5, 915),
+    (5, 916),
+    (5, 917),
+    (5, 918),
+    (5, 919),
+    (5, 920),
+    (5, 921),
+    (5, 922),
+    (5, 923),
+    (5, 924),
+    (5, 925),
+    (6, 901),
+    (6, 902),
+    (6, 903),
+    (6, 904),
+    (6, 905),
+    (6, 906),
+    (6, 907),
+    (6, 908),
+    (6, 909),
+    (6, 910),
+    (6, 911),
+    (6, 912),
+    (6, 913),
+    (6, 914),
+    (6, 915),
+    (6, 916),
+    (6, 917),
+    (6, 918),
+    (6, 919),
+    (6, 920),
+    (6, 921),
+    (6, 922),
+    (6, 923),
+    (6, 924),
+    (6, 925);
+
+
+
+-- ============================================================
+--  디지털경영전공 (dept_id=3)
+-- ============================================================
+
+-- 교육과정 (21~23: 전선30 / 24~26: 전선27, 심화는 +18, 토익650)
+INSERT INTO curriculum
+    (curr_id, dept_id, entrance_year, elective_normal, elective_intensive, elective_double, toeic_min) VALUES
+    (3001, 3, 2021, 30, 48, 30, 650),
+    (3002, 3, 2022, 30, 48, 30, 650),
+    (3003, 3, 2023, 30, 48, 30, 650),
+    (3004, 3, 2024, 27, 45, 27, 650),
+    (3005, 3, 2025, 27, 45, 27, 650),
+    (3006, 3, 2026, 27, 45, 27, 650);
+
+-- 디지털경영 과목 55개
+INSERT INTO course (course_id, dept_id, course_code, course_name, credit, course_type) VALUES
+    (201, 3, 'DIGB121', '프로젝트학기Ⅰ', 3, 'major_elective'),
+    (202, 3, 'DIGB122', '프로젝트학기Ⅱ', 3, 'major_elective'),
+    (203, 3, 'DIGB123', '프로젝트학기Ⅲ', 3, 'major_elective'),
+    (204, 3, 'DIGB124', '프로젝트학기Ⅳ', 3, 'major_elective'),
+    (205, 3, 'DIGB125', '프로젝트학기Ⅴ', 3, 'major_elective'),
+    (206, 3, 'DIGB171', '인공지능과경영', 3, 'major_elective'),
+    (207, 3, 'DIGB173', '디지털비즈니스의이해', 3, 'major_required'),
+    (208, 3, 'DIGB174', '디지털경영수학', 3, 'major_required'),
+    (209, 3, 'DIGB216', '디지털비즈니스기술', 3, 'major_elective'),
+    (210, 3, 'DIGB217', '응용경영통계:R을활용한다변량분석', 3, 'major_required'),
+    (211, 3, 'DIGB222', '인터페이스설계', 3, 'major_elective'),
+    (212, 3, 'DIGB224', '디지털혁신과전략', 3, 'major_elective'),
+    (213, 3, 'DIGB225', '머신러닝', 3, 'major_required'),
+    (214, 3, 'DIGB226', '딥러닝을활용한자연어처리', 3, 'major_elective'),
+    (215, 3, 'DIGB231', '시스템분석및설계', 3, 'major_required'),
+    (216, 3, 'DIGB241', '디지털마케팅', 3, 'major_required'),
+    (217, 3, 'DIGB242', '모바일마케팅', 3, 'major_elective'),
+    (218, 3, 'DIGB243', '디지털디자인사고', 3, 'major_elective'),
+    (219, 3, 'DIGB244', '디지털창업', 3, 'major_elective'),
+    (220, 3, 'DIGB246', '디지털비즈니스모델', 3, 'major_elective'),
+    (221, 3, 'DIGB249', '데이터베이스설계', 3, 'major_required'),
+    (222, 3, 'DIGB251', '파이썬을활용한BusinessDataAnalytics', 3, 'major_required'),
+    (223, 3, 'DIGB331', '공급망관리(SCM)', 3, 'major_elective'),
+    (224, 3, 'DIGB334', '지식경영', 3, 'major_elective'),
+    (225, 3, 'DIGB335', '오퍼레이션즈애널리틱스', 3, 'major_elective'),
+    (226, 3, 'DIGB336', '자료구조와알고리즘', 3, 'major_elective'),
+    (227, 3, 'DIGB337', '경영계량분석', 3, 'major_required'),
+    (228, 3, 'DIGB338', '경영과학', 3, 'major_elective'),
+    (229, 3, 'DIGB341', '디지털창업과자금관리', 3, 'major_elective'),
+    (230, 3, 'DIGB342', '디지털창업과지적재산권', 3, 'major_elective'),
+    (231, 3, 'DIGB343', '비즈니스분석및BI', 3, 'major_elective'),
+    (232, 3, 'DIGB344', '마케터를위한데이터분석', 3, 'major_elective'),
+    (233, 3, 'DIGB345', '마케터를위한데이터분석심화', 3, 'major_elective'),
+    (234, 3, 'DIGB352', '디지털비즈니스캡스톤디자인Ⅰ', 3, 'major_elective'),
+    (235, 3, 'DIGB353', '디지털비즈니스캡스톤디자인Ⅱ', 3, 'major_elective'),
+    (236, 3, 'DIGB362', '빅데이터기술', 3, 'major_elective'),
+    (237, 3, 'DIGB363', '웹어플리케이션Ⅰ', 3, 'major_elective'),
+    (238, 3, 'DIGB364', '웹어플리케이션Ⅱ', 3, 'major_elective'),
+    (239, 3, 'DIGB365', '모바일앱개발', 3, 'major_elective'),
+    (240, 3, 'DIGB366', '의사결정자를위한딥러닝', 3, 'major_elective'),
+    (241, 3, 'DIGB367', 'e-커머스전략', 3, 'major_elective'),
+    (242, 3, 'DIGB368', '데이터기반개인화전략과추천시스템', 3, 'major_elective'),
+    (243, 3, 'DIGB413', '신흥기술', 3, 'major_elective'),
+    (244, 3, 'DIGB415', '디지털플랫폼과창업', 3, 'major_elective'),
+    (245, 3, 'DIGB416', '고급비즈니스어낼리틱스', 3, 'major_elective'),
+    (246, 3, 'DIGB423', '디지털경영론', 3, 'major_elective'),
+    (247, 3, 'DIGB424', 'IT컨설팅', 3, 'major_elective'),
+    (248, 3, 'DIGB432', '디지털경영컨설팅', 3, 'major_elective'),
+    (249, 3, 'DIGB441', '알고리즘투자전략', 3, 'major_elective'),
+    (250, 3, 'DIGB444', '디지털경영세미나', 3, 'major_elective'),
+    (251, 3, 'DIGB451', '현장실습Ⅰ', 3, 'major_elective'),
+    (252, 3, 'DIGB452', '현장실습Ⅱ', 3, 'major_elective'),
+    (253, 3, 'DIGB453', '현장실습Ⅲ', 3, 'major_elective'),
+    (254, 3, 'DIGB461', '디지털창업프로젝트', 3, 'major_elective'),
+    (255, 3, 'GLOB164', '회계정보의이해', 3, 'major_required');
+
+-- 전공필수 연결: 21~23학번(3001~3003)=5과목, 24~26학번(3004~3006)=6과목
+INSERT INTO required_course (curr_id, course_id) VALUES
+    (3001, 207),
+    (3001, 221),
+    (3001, 215),
+    (3001, 216),
+    (3001, 255),
+    (3002, 207),
+    (3002, 221),
+    (3002, 215),
+    (3002, 216),
+    (3002, 255),
+    (3003, 207),
+    (3003, 221),
+    (3003, 215),
+    (3003, 216),
+    (3003, 255),
+    (3004, 208),
+    (3004, 216),
+    (3004, 210),
+    (3004, 227),
+    (3004, 213),
+    (3004, 222),
+    (3005, 208),
+    (3005, 216),
+    (3005, 210),
+    (3005, 227),
+    (3005, 213),
+    (3005, 222),
+    (3006, 208),
+    (3006, 216),
+    (3006, 210),
+    (3006, 227),
+    (3006, 213),
+    (3006, 222);
+
+
+
+-- ============================================================
+--  수학과 (dept_id=2) — 21~26학번 동일, 어학조건 없음(toeic 0)
+-- ============================================================
+
+-- 교육과정 (전선12 / 심화36 / 이중12, 토익 0=어학조건 없음)
+INSERT INTO curriculum
+    (curr_id, dept_id, entrance_year, elective_normal, elective_intensive, elective_double, toeic_min) VALUES
+    (2001, 2, 2021, 12, 36, 12, 0),
+    (2002, 2, 2022, 12, 36, 12, 0),
+    (2003, 2, 2023, 12, 36, 12, 0),
+    (2004, 2, 2024, 12, 36, 12, 0),
+    (2005, 2, 2025, 12, 36, 12, 0),
+    (2006, 2, 2026, 12, 36, 12, 0);
+
+-- 수학과 과목
+INSERT INTO course (course_id, dept_id, course_code, course_name, credit, course_type) VALUES
+    (301, 2, 'MATH211', '해석학Ⅰ및연습', 3, 'major_required'),
+    (302, 2, 'MATH212', '해석학Ⅱ및연습', 3, 'major_required'),
+    (303, 2, 'MATH221', '선형대수Ⅰ및연습', 3, 'major_required'),
+    (304, 2, 'MATH222', '선형대수Ⅱ및연습', 3, 'major_required'),
+    (305, 2, 'MATH315', '복소해석학I', 3, 'major_required'),
+    (306, 2, 'MATH321', '대수학Ⅰ', 3, 'major_required'),
+    (307, 2, 'MATH331', '미분기하학Ⅰ', 3, 'major_required'),
+    (308, 2, 'MATH333', '위상수학Ⅰ', 3, 'major_required'),
+    (309, 2, 'MATH003', 'TOPIC COURSE', 3, 'major_elective'),
+    (310, 2, 'MATH201', '집합론', 3, 'major_elective'),
+    (311, 2, 'MATH203', '이산수학', 3, 'major_elective'),
+    (312, 2, 'MATH223', '정수론', 3, 'major_elective'),
+    (313, 2, 'MATH232', '기하학개론', 3, 'major_elective'),
+    (314, 2, 'MATH240', '미분방정식및연습', 3, 'major_elective'),
+    (315, 2, 'MATH282', '미분방정식론', 3, 'major_elective'),
+    (316, 2, 'MATH292', '인공지능의수학적기초', 3, 'major_elective'),
+    (317, 2, 'MATH342', '수치해석및연습', 3, 'major_elective'),
+    (318, 2, 'MATH343', '확률과통계및연습', 3, 'major_elective'),
+    (319, 2, 'MATH344', '확률과정개론', 3, 'major_elective'),
+    (320, 2, 'MATH358', '복소해석학II', 3, 'major_elective'),
+    (321, 2, 'MATH362', '대수학Ⅱ', 3, 'major_elective'),
+    (322, 2, 'MATH372', '미분기하학Ⅱ', 3, 'major_elective'),
+    (323, 2, 'MATH374', '위상수학II', 3, 'major_elective'),
+    (324, 2, 'MATH391', '딥러닝의수학', 3, 'major_elective'),
+    (325, 2, 'MATH392', '강화학습의수학', 3, 'major_elective'),
+    (326, 2, 'MATH453', '실해석학', 3, 'major_elective'),
+    (327, 2, 'MATH458', '해석학특강', 3, 'major_elective'),
+    (328, 2, 'MATH462', '응용정수론', 3, 'major_elective'),
+    (329, 2, 'MATH464', '조합론', 3, 'major_elective'),
+    (330, 2, 'MATH469', '대수학특강', 3, 'major_elective'),
+    (331, 2, 'MATH476', '기하학특강', 3, 'major_elective'),
+    (332, 2, 'MATH477', '위상수학특강', 3, 'major_elective'),
+    (333, 2, 'MATH481', '편미분방정식및연습', 3, 'major_elective'),
+    (334, 2, 'MATH483', '금융수학', 3, 'major_elective'),
+    (335, 2, 'MATH484', '보험수학', 3, 'major_elective'),
+    (336, 2, 'MATH487', '응용수학특강', 3, 'major_elective'),
+    (337, 2, 'MATH488', '확률론특강', 3, 'major_elective'),
+    (338, 2, 'MATH491', '인공지능의수학적기법', 3, 'major_elective');
+
+-- 전공필수 연결: 21~26학번 모두 전필 8과목 동일
+INSERT INTO required_course (curr_id, course_id) VALUES
+    (2001, 301),
+    (2001, 302),
+    (2001, 303),
+    (2001, 304),
+    (2001, 305),
+    (2001, 306),
+    (2001, 307),
+    (2001, 308),
+    (2002, 301),
+    (2002, 302),
+    (2002, 303),
+    (2002, 304),
+    (2002, 305),
+    (2002, 306),
+    (2002, 307),
+    (2002, 308),
+    (2003, 301),
+    (2003, 302),
+    (2003, 303),
+    (2003, 304),
+    (2003, 305),
+    (2003, 306),
+    (2003, 307),
+    (2003, 308),
+    (2004, 301),
+    (2004, 302),
+    (2004, 303),
+    (2004, 304),
+    (2004, 305),
+    (2004, 306),
+    (2004, 307),
+    (2004, 308),
+    (2005, 301),
+    (2005, 302),
+    (2005, 303),
+    (2005, 304),
+    (2005, 305),
+    (2005, 306),
+    (2005, 307),
+    (2005, 308),
+    (2006, 301),
+    (2006, 302),
+    (2006, 303),
+    (2006, 304),
+    (2006, 305),
+    (2006, 306),
+    (2006, 307),
+    (2006, 308);
+
+
+
+-- ============================================================
+--  학생 5명 + 수강이력 + 어학성적
+-- ============================================================
+
+INSERT INTO student (student_id, student_name, curr_id, double_curr_id, major_track, human_rights_count) VALUES
+    (2021390703, '박준영', 3001, 1001, 'double', 4),
+    (2021390711, '이지인', 1001, NULL, 'intensive', 4),
+    (2024170825, '니사', 1004, NULL, 'intensive', 2),
+    (2023170843, '엘리프', 1003, NULL, 'intensive', 4),
+    (2024170922, '홍길동', 2004, 1004, 'double', 4);
+
+-- 수강이력
+INSERT INTO enrollment (student_id, course_id, semester, grade) VALUES
+    (2021390703, 207, '2021-1', 'A+'),
+    (2021390703, 215, '2021-2', 'A'),
+    (2021390703, 216, '2022-1', 'B+'),
+    (2021390703, 221, '2022-2', 'B'),
+    (2021390703, 255, '2023-1', 'A'),
+    (2021390703, 201, '2023-2', 'A+'),
+    (2021390703, 202, '2024-1', 'B+'),
+    (2021390703, 203, '2024-2', 'A'),
+    (2021390703, 204, '2025-1', 'B'),
+    (2021390703, 205, '2025-2', 'A+'),
+    (2021390703, 206, '2026-1', 'A'),
+    (2021390703, 209, '2026-2', 'B+'),
+    (2021390703, 211, '2027-1', 'A'),
+    (2021390703, 212, '2027-2', 'B'),
+    (2021390703, 214, '2028-1', 'A+'),
+    (2021390703, 101, '2028-2', 'A'),
+    (2021390703, 102, '2029-1', 'B'),
+    (2021390703, 103, '2029-2', 'A+'),
+    (2021390703, 104, '2030-1', 'A'),
+    (2021390703, 105, '2030-2', 'B+'),
+    (2021390703, 106, '2031-1', 'A'),
+    (2021390703, 107, '2031-2', 'B+'),
+    (2021390703, 121, '2032-1', 'A'),
+    (2021390703, 122, '2032-2', 'A+'),
+    (2021390703, 123, '2033-1', 'B'),
+    (2021390703, 124, '2033-2', 'A+'),
+    (2021390703, 125, '2034-1', 'A'),
+    (2021390703, 126, '2034-2', 'B+'),
+    (2021390703, 127, '2035-1', 'B'),
+    (2021390703, 901, '2035-2', 'A'),
+    (2021390703, 902, '2036-1', 'A+'),
+    (2021390711, 101, '2021-1', 'A+'),
+    (2021390711, 102, '2021-2', 'A'),
+    (2021390711, 103, '2022-1', 'B+'),
+    (2021390711, 104, '2022-2', 'B'),
+    (2021390711, 105, '2023-1', 'A'),
+    (2021390711, 106, '2023-2', 'A+'),
+    (2021390711, 107, '2024-1', 'B+'),
+    (2021390711, 121, '2024-2', 'A'),
+    (2021390711, 122, '2025-1', 'B'),
+    (2021390711, 123, '2025-2', 'A+'),
+    (2021390711, 124, '2026-1', 'A'),
+    (2021390711, 125, '2026-2', 'B+'),
+    (2021390711, 126, '2027-1', 'A'),
+    (2021390711, 127, '2027-2', 'B'),
+    (2021390711, 128, '2028-1', 'A+'),
+    (2021390711, 129, '2028-2', 'A'),
+    (2021390711, 130, '2029-1', 'B'),
+    (2021390711, 131, '2029-2', 'A+'),
+    (2021390711, 132, '2030-1', 'A'),
+    (2021390711, 133, '2030-2', 'B+'),
+    (2021390711, 134, '2031-1', 'A'),
+    (2021390711, 901, '2031-2', 'B+'),
+    (2021390711, 902, '2032-1', 'A'),
+    (2024170825, 101, '2024-1', 'A+'),
+    (2024170825, 102, '2024-2', 'A'),
+    (2024170825, 103, '2025-1', 'B+'),
+    (2024170825, 104, '2025-2', 'B'),
+    (2024170825, 105, '2026-1', 'A'),
+    (2024170825, 106, '2026-2', 'A+'),
+    (2024170825, 107, '2027-1', 'B+'),
+    (2024170825, 121, '2027-2', 'A'),
+    (2024170825, 122, '2028-1', 'B'),
+    (2024170825, 123, '2028-2', 'A+'),
+    (2024170825, 124, '2029-1', 'A'),
+    (2024170825, 125, '2029-2', 'B+'),
+    (2024170825, 126, '2030-1', 'A'),
+    (2024170825, 127, '2030-2', 'B'),
+    (2024170825, 128, '2031-1', 'A+'),
+    (2024170825, 129, '2031-2', 'A'),
+    (2024170825, 130, '2032-1', 'B'),
+    (2024170825, 131, '2032-2', 'A+'),
+    (2024170825, 132, '2033-1', 'A'),
+    (2024170825, 133, '2033-2', 'B+'),
+    (2024170825, 134, '2034-1', 'A'),
+    (2023170843, 101, '2023-1', 'A+'),
+    (2023170843, 102, '2023-2', 'A'),
+    (2023170843, 103, '2024-1', 'B+'),
+    (2023170843, 104, '2024-2', 'B'),
+    (2023170843, 105, '2025-1', 'A'),
+    (2023170843, 106, '2025-2', 'A+'),
+    (2023170843, 121, '2026-1', 'B+'),
+    (2023170843, 122, '2026-2', 'A'),
+    (2023170843, 123, '2027-1', 'B'),
+    (2023170843, 124, '2027-2', 'A+'),
+    (2023170843, 125, '2028-1', 'A'),
+    (2023170843, 126, '2028-2', 'B+'),
+    (2023170843, 127, '2029-1', 'A'),
+    (2023170843, 128, '2029-2', 'B'),
+    (2023170843, 129, '2030-1', 'A+'),
+    (2023170843, 130, '2030-2', 'A'),
+    (2023170843, 131, '2031-1', 'B'),
+    (2023170843, 132, '2031-2', 'A+'),
+    (2023170843, 133, '2032-1', 'A'),
+    (2023170843, 134, '2032-2', 'B+'),
+    (2023170843, 901, '2033-1', 'A'),
+    (2023170843, 902, '2033-2', 'B+'),
+    (2024170922, 301, '2024-1', 'A+'),
+    (2024170922, 302, '2024-2', 'A'),
+    (2024170922, 303, '2025-1', 'B+'),
+    (2024170922, 304, '2025-2', 'B'),
+    (2024170922, 305, '2026-1', 'A'),
+    (2024170922, 306, '2026-2', 'A+'),
+    (2024170922, 307, '2027-1', 'B+'),
+    (2024170922, 308, '2027-2', 'A'),
+    (2024170922, 309, '2028-1', 'B'),
+    (2024170922, 310, '2028-2', 'A+'),
+    (2024170922, 101, '2029-1', 'A'),
+    (2024170922, 102, '2029-2', 'B+'),
+    (2024170922, 103, '2030-1', 'A'),
+    (2024170922, 104, '2030-2', 'B'),
+    (2024170922, 105, '2031-1', 'A+'),
+    (2024170922, 106, '2031-2', 'A'),
+    (2024170922, 107, '2032-1', 'B'),
+    (2024170922, 121, '2032-2', 'A+'),
+    (2024170922, 122, '2033-1', 'A'),
+    (2024170922, 123, '2033-2', 'B+');
+
+-- 어학성적 (엘리프는 어학 미제출이라 없음)
+INSERT INTO certification (student_id, cert_type, score) VALUES
+    (2021390703, 'TOEIC', 720),
+    (2021390711, 'TOEIC', 810),
+    (2024170825, 'TOEIC', 700),
+    (2024170922, 'TOEIC', 700);
